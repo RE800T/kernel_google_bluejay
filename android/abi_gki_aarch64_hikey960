@@ -44,7 +44,6 @@
   cdev_device_add
   cdev_device_del
   cdev_init
-  __cfi_slowpath
   __check_object_size
   __class_create
   class_destroy
