@@ -10,7 +10,6 @@
   arch_timer_read_counter
   bcmp
   cancel_work_sync
-  __cfi_slowpath
   complete_all
   completion_done
   cpu_have_feature
