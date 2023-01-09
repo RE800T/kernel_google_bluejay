@@ -32,6 +32,58 @@
 #include <trace/events/power.h>
 #include <trace/hooks/cpufreq.h>
 
+#ifdef CONFIG_UCI
+#include <linux/uci/uci.h>
+#include <linux/notification/notification.h>
+
+// saver 1
+#define LVL1_LITTLE 1704000
+#define LVL1_BIG    2130000
+#define LVL1_PRIME  2401000
+
+// saver 2
+#define LVL2_LITTLE 1598000
+#define LVL2_BIG    1836000
+#define LVL2_PRIME  2188000
+
+// saver 3
+#define LVL3_LITTLE 1401000
+#define LVL3_BIG    1491000
+#define LVL3_PRIME  1745000
+
+static int batterysaver = 0; // 0 - 1 - 3
+// default 0, seriously cutting back max freqs for sunshine inside car/long gps tracking...
+// 1 medium cutback, 2 full cutback, 3 full cutback and disable touch freq min boost
+
+static int batterysaver_level = 0; // 0 - 1 - 3
+static bool batterysaver_touch_limiting = false;
+#define BATTERY_SAVER_MAX_LEVEL 3
+
+static void uci_user_listener(void) {
+    batterysaver = !!uci_get_user_property_int_mm("batterysaver", 0,0,1);
+    batterysaver_level = uci_get_user_property_int_mm("batterysaver_level", 0,0,BATTERY_SAVER_MAX_LEVEL);
+    batterysaver_touch_limiting = !!uci_get_user_property_int_mm("batterysaver_touch_limiting", 0,0,1);
+}
+
+static bool suspend_batterysaver = false;
+
+static void ntf_listener(char* event, int num_param, char* str_param) {
+        if (strcmp(event,NTF_EVENT_CHARGE_LEVEL) && strcmp(event, NTF_EVENT_INPUT)) {
+                pr_info("%s CPUFREQ listener event %s %d %s\n",__func__,event,num_param,str_param);
+        }
+
+        if (!strcmp(event,NTF_EVENT_CAMERA_ON)) {
+                if (!!num_param) {
+                        // camera on..
+			pr_info("%s suspending battery saver, camera on\n",__func__);
+			suspend_batterysaver = true;
+		} else {
+			pr_info("%s stop suspending battery saver, camera off\n",__func__);
+			suspend_batterysaver = false;
+		}
+	}
+}
+#endif
 static LIST_HEAD(cpufreq_policy_list);
 
 /* Macros to iterate over CPU policies */
@@ -528,7 +580,33 @@ void cpufreq_disable_fast_switch(struct cpufreq_policy *policy)
 	mutex_unlock(&cpufreq_fast_switch_lock);
 }
 EXPORT_SYMBOL_GPL(cpufreq_disable_fast_switch);
+#ifdef CONFIG_UCI
 
+// cpu max freqs for saver modes...
+static int batterysaver_max_freqs[BATTERY_SAVER_MAX_LEVEL][8] = {
+	// little x 4 , big x 2, prime x 2 - clusters
+	// saver 1
+	{ LVL1_LITTLE,LVL1_LITTLE,LVL1_LITTLE,LVL1_LITTLE,
+	LVL1_BIG,LVL1_BIG,
+	LVL1_PRIME,LVL1_PRIME },
+	// saver 2
+	{ LVL2_LITTLE,LVL2_LITTLE,LVL2_LITTLE,LVL2_LITTLE,
+	LVL2_BIG,LVL2_BIG,
+	LVL2_PRIME,LVL2_PRIME },
+	// saver 3
+	{ LVL3_LITTLE,LVL3_LITTLE,LVL3_LITTLE,LVL3_LITTLE,
+	LVL3_BIG,LVL3_BIG,
+	LVL3_PRIME,LVL3_PRIME }
+};
+
+static int get_cpu_max_for_core(unsigned int cpu, int batterysaverlevel) {
+	if (cpu<=7 && batterysaverlevel>0 && batterysaverlevel<=BATTERY_SAVER_MAX_LEVEL) {
+		return batterysaver_max_freqs[batterysaverlevel-1][cpu];
+	} else {
+	    return -EINVAL;
+	}
+}
+#endif
 /**
  * cpufreq_driver_resolve_freq - Map a target frequency to a driver-supported
  * one.
