@@ -759,7 +759,6 @@
   downgrade_write
   down_trylock
   dump_stack
-  failure_tracking
   fd_install
   find_vma
   fput
