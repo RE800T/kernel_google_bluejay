@@ -95,7 +95,8 @@ static LIST_HEAD(drvdata_list);
 #define S3C64XX_SPI_ST_RX_FIFORDY		BIT(1)
 #define S3C64XX_SPI_ST_TX_FIFORDY		BIT(0)
 
-#define S3C64XX_SPI_PACKET_CNT_EN		BIT(16)
+#define S3C64XX_SPI_PACKET_CNT_EN		(1<<16)
+#define S3C64XX_SPI_PACKET_CNT_MASK		GENMASK(15, 0)
 
 #define S3C64XX_SPI_PND_TX_UNDERRUN_CLR		BIT(4)
 #define S3C64XX_SPI_PND_TX_OVERRUN_CLR		BIT(3)
@@ -978,7 +979,27 @@ static int s3c64xx_spi_transfer_one_message(struct spi_master *master,
 		unsigned long flags;
 		int use_dma;
 
-		reinit_completion(&sdd->xfer_completion);
+static size_t s3c64xx_spi_max_transfer_size(struct spi_device *spi)
+{
+	struct spi_controller *ctlr = spi->controller;
+
+	return ctlr->can_dma ? S3C64XX_SPI_PACKET_CNT_MASK : SIZE_MAX;
+}
+
+static int s3c64xx_spi_transfer_one(struct spi_master *master,
+				    struct spi_device *spi,
+				    struct spi_transfer *xfer)
+{
+	struct s3c64xx_spi_driver_data *sdd = spi_master_get_devdata(master);
+	const unsigned int fifo_len = (FIFO_LVL_MASK(sdd) >> 1) + 1;
+	const void *tx_buf = NULL;
+	void *rx_buf = NULL;
+	int target_len = 0, origin_len = 0;
+	int use_dma = 0;
+	int status;
+	u32 speed;
+	u8 bpw;
+	unsigned long flags;
 
 		/* Only BPW and Speed may change across transfers */
 		bpw = xfer->bits_per_word;
@@ -1676,8 +1697,9 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
 	master->setup = s3c64xx_spi_setup;
 	master->cleanup = s3c64xx_spi_cleanup;
 	master->prepare_transfer_hardware = s3c64xx_spi_prepare_transfer;
-	master->transfer_one_message = s3c64xx_spi_transfer_one_message;
-	master->unprepare_transfer_hardware = s3c64xx_spi_unprepare_transfer;
+	master->prepare_message = s3c64xx_spi_prepare_message;
+	master->transfer_one = s3c64xx_spi_transfer_one;
+	master->max_transfer_size = s3c64xx_spi_max_transfer_size;
 	master->num_chipselect = sci->num_cs;
 	master->dma_alignment = 8;
 	master->bits_per_word_mask = BIT(32 - 1) | BIT(16 - 1) | BIT(8 - 1);
